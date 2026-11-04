@@ -26,11 +26,10 @@ const authHandler = require('./api/auth.js');
 
 app.all('/api/menu', (req, res) => menuHandler(req, res));
 app.all('/api/orders', (req, res) => ordersHandler(req, res));
-app.all('/api/auth/*', (req, res) => authHandler(req, res));
-app.all('/api/auth', (req, res) => authHandler(req, res));
+app.use('/api/auth', (req, res) => authHandler(req, res));
 
 // 3. Root Route & SPA Fallback (Never show "Cannot GET /")
-app.get('*', (req, res) => {
+app.use((req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ success: false, message: `API endpoint ${req.path} not found` });
   }

@@ -1,0 +1,52 @@
+CANTEENX - HOW TO RUN
+=====================
+
+Requirements
+------------
+- Python 3 (for the main server)  - https://www.python.org/downloads/
+- Node.js (only for the optional Node server) - https://nodejs.org/
+
+
+OPTION 1: PYTHON SERVER (RECOMMENDED - full app with database)
+--------------------------------------------------------------
+Easiest:
+  1. Double-click start_canteenx.bat
+  2. Your browser opens at http://localhost:8000
+
+Or from a terminal, inside the canteenx folder:
+  python server.py
+Then open http://localhost:8000
+
+Demo logins:
+  Student:        aarav@campus.edu   /  campus123
+  Kitchen staff:  chef@canteenx.edu  /  chef123
+
+Data is stored in canteen_database.db (created automatically).
+To stop the server: press Ctrl+C in the terminal, or close its window.
+
+
+OPTION 2: NODE / EXPRESS SERVER (lightweight fallback)
+------------------------------------------------------
+Inside the canteenx folder:
+  npm install      (first time only)
+  npm start
+Then open http://localhost:8000
+
+To run it on a different port (e.g. alongside the Python server):
+  PowerShell:  $env:PORT=8001; npm start
+  Git Bash:    PORT=8001 npm start
+Then open http://localhost:8001
+
+Note: this server keeps data in memory only (lost on restart) and does not
+support updating order status or toggling item stock. Use Option 1 for the
+full app.
+
+
+TROUBLESHOOTING
+---------------
+- "Port 8000 already in use": another server is still running. Close it
+  (Ctrl+C in its window, or end the python/node process in Task Manager),
+  or run the Node server on another port as shown above.
+- "python is not recognized": install Python and tick "Add Python to PATH",
+  or try:  py server.py
+- "npm is not recognized": install Node.js, then reopen the terminal.

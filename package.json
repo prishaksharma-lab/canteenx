@@ -2,8 +2,13 @@
   "name": "canteenx-smart-canteen",
   "version": "1.0.0",
   "description": "Smart Canteen Ordering & Queue Management System",
-  "main": "index.html",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 0"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
   }
 }
