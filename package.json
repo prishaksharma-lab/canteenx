@@ -1,0 +1,9 @@
+{
+  "name": "canteenx-smart-canteen",
+  "version": "1.0.0",
+  "description": "Smart Canteen Ordering & Queue Management System",
+  "main": "index.html",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 0"
+  }
+}
