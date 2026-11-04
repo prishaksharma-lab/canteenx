@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "name": "canteenx-smart-canteen",
+  "builds": [
+    { "src": "index.html", "use": "@vercel/static" },
+    { "src": "assets/**", "use": "@vercel/static" },
+    { "src": "api/*.js", "use": "@vercel/node" }
+  ],
+  "routes": [
+    { "src": "/api/menu", "dest": "/api/menu.js" },
+    { "src": "/api/orders", "dest": "/api/orders.js" },
+    { "src": "/api/auth/(.*)", "dest": "/api/auth.js" },
+    { "src": "/assets/(.*)", "dest": "/assets/$1" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
+}

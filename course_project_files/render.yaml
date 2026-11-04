@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: canteenx-backend
+    env: node
+    plan: free
+    buildCommand: cd course_project_files/backend && npm install
+    startCommand: cd course_project_files/backend && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
