@@ -37,7 +37,20 @@ module.exports = async function handler(req, res) {
 
     let menu;
     if (col) {
-      if ((await col.countDocuments()) === 0) await col.insertMany(seedMenu.map(i => ({ ...i })));
+      // Idempotent seeding: upsert by id, so concurrent cold-start requests can't insert twice.
+      await col.bulkWrite(seedMenu.map(i => ({
+        updateOne: { filter: { id: i.id }, update: { $setOnInsert: { ...i } }, upsert: true }
+      })));
+      // Clean up duplicates left by the old non-idempotent seeding, then enforce uniqueness.
+      const all = await col.find({}, { projection: { _id: 1, id: 1 } }).toArray();
+      const seen = new Set();
+      const extras = [];
+      for (const d of all) {
+        if (seen.has(d.id)) extras.push(d._id);
+        else seen.add(d.id);
+      }
+      if (extras.length) await col.deleteMany({ _id: { $in: extras } });
+      await col.createIndex({ id: 1 }, { unique: true }).catch(() => {});
       menu = await col.find({}, { projection: { _id: 0 } }).toArray();
     } else {
       menu = memoryMenu;
