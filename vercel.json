@@ -1,6 +1,6 @@
 {
   "rewrites": [
-    { "source": "/api/auth/:action", "destination": "/api/auth" },
+    { "source": "/api/auth/:action", "destination": "/api/auth?action=:action" },
     { "source": "/api/orders/:id", "destination": "/api/orders?id=:id" },
     { "source": "/api/menu/:id", "destination": "/api/menu?id=:id" },
     { "source": "/((?!api/|assets/).*)", "destination": "/index.html" }

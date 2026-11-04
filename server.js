@@ -28,7 +28,7 @@ app.all('/api/menu/:id', (req, res) => { req.query.id = req.params.id; menuHandl
 app.all('/api/orders/:id', (req, res) => { req.query.id = req.params.id; ordersHandler(req, res); });
 app.all('/api/menu', (req, res) => menuHandler(req, res));
 app.all('/api/orders', (req, res) => ordersHandler(req, res));
-app.use('/api/auth', (req, res) => authHandler(req, res));
+app.all('/api/auth/:action', (req, res) => { req.query.action = req.params.action; authHandler(req, res); });
 
 // 3. Root Route & SPA Fallback (Never show "Cannot GET /")
 app.use((req, res) => {

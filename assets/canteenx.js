@@ -1117,7 +1117,7 @@
 
       return `
         <div class="modal-backdrop open" data-action="close-auth-modal">
-          <div class="order-modal" style="max-width: 440px;" onclick="event.stopPropagation()">
+          <div class="order-modal" style="max-width: 440px;">
             <div class="order-modal-header">
               <div style="font-weight: 800; font-family: var(--font-serif); font-size: 1.15rem;">
                 ${isLogin ? 'Sign In to CanteenX' : 'Create Campus Account'}
@@ -1250,7 +1250,7 @@
       return `
         <!-- Clicking backdrop closes the progress modal -->
         <div class="modal-backdrop open" data-action="close-order-modal">
-          <div class="order-modal" onclick="event.stopPropagation()">
+          <div class="order-modal">
             <div class="order-modal-header">
               <div style="font-weight: 800; font-size: 0.98rem; font-family: var(--font-serif);">
                 Live Digital Token Pass
@@ -1469,6 +1469,8 @@
       this.root.onclick = async (e) => {
         const target = e.target.closest('[data-action]');
         if (!target) return;
+        // Backdrops only act when the backdrop itself is clicked, not when a click lands inside the modal.
+        if (target.classList.contains('modal-backdrop') && e.target !== target) return;
 
         const action = target.getAttribute('data-action');
 

@@ -8,7 +8,9 @@
     "test": "echo \"Error: no test specified\" && exit 0"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "mongodb": "^7.8.0"
   }
 }
