@@ -10,6 +10,9 @@ import json
 import time
 import sqlite3
 import hashlib
+import hmac
+import base64
+import secrets
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse
 from datetime import datetime
@@ -82,6 +85,18 @@ def init_db():
         )
     """)
 
+    # Migration: link orders to the user that placed them (for role-scoped visibility)
+    cursor.execute("PRAGMA table_info(orders)")
+    if "user_id" not in [c[1] for c in cursor.fetchall()]:
+        cursor.execute("ALTER TABLE orders ADD COLUMN user_id TEXT")
+        cursor.execute("UPDATE orders SET user_id = 'usr-1' WHERE student_roll = 'CS-2024-042'")
+
+    # Secret used to sign session tokens (generated once, persisted)
+    cursor.execute("SELECT value_json FROM app_state WHERE key = 'token_secret'")
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO app_state (key, value_json) VALUES ('token_secret', ?)",
+                       (json.dumps(secrets.token_hex(32)),))
+
     # Seed default users if empty
     cursor.execute("SELECT COUNT(*) FROM users")
     if cursor.fetchone()[0] == 0:
@@ -136,6 +151,47 @@ def init_db():
 init_db()
 
 # ==============================================================================
+# Role-based access control
+# ==============================================================================
+ROLE_STUDENT = "student"
+ROLE_STAFF = "kitchen_staff"
+TOKEN_TTL_SECONDS = 12 * 3600
+ORDER_STATUSES = ("Pending", "Preparing", "Ready", "Collected", "Completed")
+
+def _secret():
+    conn = sqlite3.connect(DB_FILE)
+    row = conn.execute("SELECT value_json FROM app_state WHERE key = 'token_secret'").fetchone()
+    conn.close()
+    return json.loads(row[0]).encode("utf-8")
+
+def _b64(data):
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+def make_token(user_id):
+    payload = _b64(json.dumps({"sub": user_id, "exp": int(time.time()) + TOKEN_TTL_SECONDS}).encode("utf-8"))
+    sig = _b64(hmac.new(_secret(), payload.encode("ascii"), hashlib.sha256).digest())
+    return f"{payload}.{sig}"
+
+def verify_token(token):
+    """Returns the user id from a valid, unexpired token, else None."""
+    try:
+        payload, sig = token.split(".", 1)
+        expected = _b64(hmac.new(_secret(), payload.encode("ascii"), hashlib.sha256).digest())
+        if not hmac.compare_digest(sig, expected):
+            return None
+        data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        if data["exp"] < time.time():
+            return None
+        return data["sub"]
+    except Exception:
+        return None
+
+def redact_order(order):
+    """Public view of an order: queue position/status only, no personal details."""
+    return {**order, "studentName": "", "studentRoll": "", "items": [], "specialInstructions": ""}
+
+
+# ==============================================================================
 # HTTP Request Handler & Database API Endpoints
 # ==============================================================================
 class CanteenHandler(SimpleHTTPRequestHandler):
@@ -146,6 +202,32 @@ class CanteenHandler(SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+    def _current_user(self):
+        """Resolve the Bearer token to a user (role read fresh from the DB), or None."""
+        header = self.headers.get("Authorization", "")
+        if not header.startswith("Bearer "):
+            return None
+        user_id = verify_token(header[7:].strip())
+        if not user_id:
+            return None
+        conn = sqlite3.connect(DB_FILE)
+        row = conn.execute("SELECT id, name, email, roll_number, role FROM users WHERE id = ?", (user_id,)).fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {"id": row[0], "name": row[1], "email": row[2], "rollNumber": row[3], "role": row[4]}
+
+    def _require(self, *roles):
+        """Returns the authenticated user if allowed; otherwise sends 401/403 and returns None."""
+        user = self._current_user()
+        if not user:
+            self._send_json({"success": False, "message": "Authentication required"}, 401)
+            return None
+        if roles and user["role"] not in roles:
+            self._send_json({"success": False, "message": "You do not have permission to do that"}, 403)
+            return None
+        return user
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -192,11 +274,12 @@ class CanteenHandler(SimpleHTTPRequestHandler):
                 return
 
             elif path == "/api/orders":
-                cursor.execute("SELECT id, token, student_name, student_roll, items_json, total_amount, status, estimated_wait, special_instructions, counter, created_at, updated_at FROM orders ORDER BY created_at DESC")
+                viewer = self._current_user()
+                cursor.execute("SELECT id, token, student_name, student_roll, items_json, total_amount, status, estimated_wait, special_instructions, counter, created_at, updated_at, user_id FROM orders ORDER BY created_at DESC")
                 rows = cursor.fetchall()
                 orders = []
                 for r in rows:
-                    orders.append({
+                    order = {
                         "id": r[0],
                         "token": r[1],
                         "studentName": r[2],
@@ -209,7 +292,11 @@ class CanteenHandler(SimpleHTTPRequestHandler):
                         "counter": r[9],
                         "createdAt": r[10],
                         "updatedAt": r[11]
-                    })
+                    }
+                    # Staff see everything; students see their own orders in full; everyone
+                    # else (guests, Counter TV) gets status-only entries with no personal data.
+                    can_see_full = viewer and (viewer["role"] == ROLE_STAFF or r[12] == viewer["id"])
+                    orders.append(order if can_see_full else redact_order(order))
                 conn.close()
                 self._send_json({"success": True, "orders": orders})
                 return
@@ -223,6 +310,9 @@ class CanteenHandler(SimpleHTTPRequestHandler):
                 return
 
             elif path == "/api/users":
+                if not self._require(ROLE_STAFF):
+                    conn.close()
+                    return
                 cursor.execute("SELECT id, name, email, roll_number, role, created_at FROM users")
                 rows = cursor.fetchall()
                 users = [{"id": r[0], "name": r[1], "email": r[2], "rollNumber": r[3], "role": r[4], "createdAt": r[5]} for r in rows]
@@ -259,7 +349,9 @@ class CanteenHandler(SimpleHTTPRequestHandler):
             email = body.get("email", "").strip().lower()
             roll_number = body.get("rollNumber", "").strip()
             password = body.get("password", "")
-            role = body.get("role", "student")
+            # Self-service sign-up only ever creates students; staff accounts are provisioned
+            # by the canteen and never trusted from the request body.
+            role = ROLE_STUDENT
 
             if not email or not password or not name:
                 conn.close()
@@ -289,7 +381,7 @@ class CanteenHandler(SimpleHTTPRequestHandler):
                 "email": email,
                 "rollNumber": roll_number or "CS-GUEST",
                 "role": role,
-                "token": f"token-{user_id}"
+                "token": make_token(user_id)
             }
             self._send_json({"success": True, "user": user_obj})
             return
@@ -311,7 +403,7 @@ class CanteenHandler(SimpleHTTPRequestHandler):
                     "email": row[2],
                     "rollNumber": row[3],
                     "role": row[4],
-                    "token": f"token-{row[0]}"
+                    "token": make_token(row[0])
                 }
                 self._send_json({"success": True, "user": user_obj})
             else:
@@ -320,6 +412,10 @@ class CanteenHandler(SimpleHTTPRequestHandler):
 
         # Route: Place Order
         elif path == "/api/orders":
+            user = self._require(ROLE_STUDENT, ROLE_STAFF)
+            if not user:
+                conn.close()
+                return
             cursor.execute("SELECT COUNT(*) FROM orders")
             count = cursor.fetchone()[0]
             next_num = 100 + count + 1
@@ -332,17 +428,18 @@ class CanteenHandler(SimpleHTTPRequestHandler):
 
             now = datetime.utcnow().isoformat() + "Z"
             order_id = f"ord-{int(time.time()*1000)}"
-            student_name = body.get("studentName", "Campus Student")
-            student_roll = body.get("studentRoll", "CS-2024-042")
+            # Identity comes from the verified token, not the request body
+            student_name = user["name"]
+            student_roll = user["rollNumber"]
             items = body.get("items", [])
             total_amount = body.get("totalAmount", 0)
             instructions = body.get("specialInstructions", "")
             counter = "Counter 1" if next_num % 2 == 1 else "Counter 2"
 
             cursor.execute("""
-                INSERT INTO orders (id, token, student_name, student_roll, items_json, total_amount, status, estimated_wait, special_instructions, counter, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (order_id, token, student_name, student_roll, json.dumps(items), total_amount, "Pending", estimated_wait, instructions, counter, now, now))
+                INSERT INTO orders (id, token, student_name, student_roll, items_json, total_amount, status, estimated_wait, special_instructions, counter, created_at, updated_at, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (order_id, token, student_name, student_roll, json.dumps(items), total_amount, "Pending", estimated_wait, instructions, counter, now, now, user["id"]))
             conn.commit()
             conn.close()
 
@@ -377,6 +474,9 @@ class CanteenHandler(SimpleHTTPRequestHandler):
         except:
             body = {}
 
+        if not self._require(ROLE_STAFF):
+            return
+
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
 
@@ -384,6 +484,11 @@ class CanteenHandler(SimpleHTTPRequestHandler):
             order_id = path.replace("/api/orders/", "").replace("/status", "").strip()
             new_status = body.get("status")
             now = datetime.utcnow().isoformat() + "Z"
+
+            if new_status not in ORDER_STATUSES:
+                conn.close()
+                self._send_json({"success": False, "message": "Invalid status"}, 400)
+                return
 
             cursor.execute("UPDATE orders SET status = ?, updated_at = ? WHERE id = ?", (new_status, now, order_id))
             conn.commit()

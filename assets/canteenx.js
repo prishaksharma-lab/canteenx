@@ -298,15 +298,9 @@
         } catch (e) {
           this.currentUser = null;
         }
-      } else {
-        // Default guest student session
-        this.currentUser = {
-          name: 'Aarav Sharma',
-          email: 'aarav@campus.edu',
-          rollNumber: 'CS-2024-042',
-          role: 'student'
-        };
       }
+      // No saved session = guest (browse the menu and Counter TV only).
+      this.activeView = this.defaultView();
 
       // Restore Menu & Orders
       const savedMenu = localStorage.getItem('canteenx_menu');
@@ -342,10 +336,52 @@
       this.fetchFromBackend();
     },
 
+    // ---- Role-based access --------------------------------------------------
+    // Which top-level views each role may open. The server enforces the real rules;
+    // this keeps the UI from offering things the account cannot use.
+    VIEW_ACCESS: {
+      guest: ['student', 'counter'],
+      student: ['student', 'counter'],
+      kitchen_staff: ['kitchen', 'counter']
+    },
+
+    role() {
+      return this.currentUser && this.currentUser.role ? this.currentUser.role : 'guest';
+    },
+
+    isStaff() {
+      return this.role() === 'kitchen_staff';
+    },
+
+    allowedViews() {
+      return this.VIEW_ACCESS[this.role()] || this.VIEW_ACCESS.guest;
+    },
+
+    canAccess(view) {
+      return this.allowedViews().includes(view);
+    },
+
+    defaultView() {
+      return this.allowedViews()[0];
+    },
+
+    // fetch() wrapper that sends the session token; an expired/invalid session signs the user out.
+    async api(url, options = {}) {
+      const headers = { ...(options.headers || {}) };
+      if (this.currentUser && this.currentUser.token) {
+        headers['Authorization'] = `Bearer ${this.currentUser.token}`;
+      }
+      const res = await fetch(url, { ...options, headers });
+      if (res.status === 401 && this.currentUser && this.currentUser.token) {
+        this.logout('Your session expired. Please sign in again.');
+      }
+      return res;
+    },
+
     // Fetch live state from backend database if running
     async fetchFromBackend() {
       try {
-        const resMenu = await fetch('/api/menu');
+        const resMenu = await this.api('/api/menu');
         if (resMenu.ok) {
           const data = await resMenu.json();
           if (data.menu && data.menu.length > 0) {
@@ -353,7 +389,7 @@
             localStorage.setItem('canteenx_menu', JSON.stringify(this.menu));
           }
         }
-        const resOrders = await fetch('/api/orders');
+        const resOrders = await this.api('/api/orders');
         if (resOrders.ok) {
           const data = await resOrders.json();
           if (data.orders) {
@@ -370,12 +406,26 @@
     saveUser(user) {
       this.currentUser = user;
       localStorage.setItem('canteenx_current_user', JSON.stringify(user));
+      this.activeView = this.defaultView();
+      this.kitchenSubTab = 'orders';
+      this.fetchFromBackend(); // order visibility depends on the role
       App.render();
     },
 
-    logout() {
+    logout(message) {
       this.currentUser = null;
+      this.activeView = this.defaultView();
+      this.cart = {};
+      // Drop cached orders so the next person on this browser doesn't see them.
+      this.orders = [];
       localStorage.removeItem('canteenx_current_user');
+      localStorage.removeItem('canteenx_orders');
+      if (message) {
+        this.isAuthModalOpen = true;
+        this.authMode = 'login';
+        this.authError = message;
+      }
+      this.fetchFromBackend();
       App.render();
     },
 
@@ -494,6 +544,9 @@
     render() {
       if (!this.root) return;
 
+      // Never render a view the current role can't open (e.g. after sign-out).
+      if (!State.canAccess(State.activeView)) State.activeView = State.defaultView();
+
       const html = `
         ${this.renderHeader()}
         ${this.renderRushBanner()}
@@ -528,7 +581,7 @@
       return `
         <header class="site-header">
           <div class="header-inner">
-            <div class="brand-container" data-action="switch-view" data-view="student">
+            <div class="brand-container" data-action="switch-view" data-view="${State.defaultView()}">
               <div class="brand-logo-mark">CX</div>
               <div>
                 <span class="brand-title">CanteenX</span>
@@ -536,21 +589,24 @@
               </div>
             </div>
 
-            <!-- View Switcher (Clean Product Views Only) -->
+            <!-- View Switcher (only the views this role may open) -->
             <div class="view-tabs">
+              ${State.canAccess('student') ? `
               <button class="view-tab-btn ${State.activeView === 'student' ? 'active' : ''}" data-action="switch-view" data-view="student">
                 <span>🎓</span>
                 <span>Student Menu</span>
-              </button>
+              </button>` : ''}
+              ${State.canAccess('kitchen') ? `
               <button class="view-tab-btn ${State.activeView === 'kitchen' ? 'active' : ''}" data-action="switch-view" data-view="kitchen">
                 <span>👨‍🍳</span>
                 <span>Kitchen Staff</span>
                 ${activePendingCount > 0 ? `<span class="badge-count">${activePendingCount}</span>` : ''}
-              </button>
+              </button>` : ''}
+              ${State.canAccess('counter') ? `
               <button class="view-tab-btn ${State.activeView === 'counter' ? 'active' : ''}" data-action="switch-view" data-view="counter">
                 <span>📺</span>
                 <span>Counter TV</span>
-              </button>
+              </button>` : ''}
             </div>
 
             <!-- Header Controls & User Session -->
@@ -560,7 +616,7 @@
                   <div class="profile-avatar">${user.name[0]}</div>
                   <div style="display: flex; flex-direction: column; text-align: left; line-height: 1.1;">
                     <span>${user.name.split(' ')[0]}</span>
-                    <span style="font-size: 0.68rem; color: var(--text-muted);">${user.rollNumber || user.role}</span>
+                    <span style="font-size: 0.68rem; color: var(--text-muted);">${user.role === 'kitchen_staff' ? 'Kitchen Staff' : (user.rollNumber || user.role)}</span>
                   </div>
                 </div>
                 <button class="action-icon-btn" data-action="logout-user" title="Sign Out">
@@ -1120,7 +1176,7 @@
           <div class="order-modal" style="max-width: 440px;">
             <div class="order-modal-header">
               <div style="font-weight: 800; font-family: var(--font-serif); font-size: 1.15rem;">
-                ${isLogin ? 'Sign In to CanteenX' : 'Create Campus Account'}
+                ${isLogin ? 'Sign In to CanteenX' : 'Create Student Account'}
               </div>
               <button class="action-icon-btn" data-action="close-auth-modal" title="Close">✕</button>
             </div>
@@ -1141,7 +1197,7 @@
                 data-action="set-auth-mode" 
                 data-mode="register"
               >
-                New Student / Staff
+                New Student
               </button>
             </div>
 
@@ -1163,13 +1219,6 @@
                   <input type="text" id="reg-roll" class="search-input" style="padding: 0.6rem 0.85rem;" placeholder="e.g. CS-2024-042" required />
                 </div>
 
-                <div style="display: flex; flex-direction: column; gap: 0.35rem;">
-                  <label style="font-size: 0.78rem; font-weight: 700; color: var(--text-muted);">Account Role</label>
-                  <select id="reg-role" class="search-input" style="padding: 0.6rem 0.85rem;">
-                    <option value="student">Student</option>
-                    <option value="kitchen_staff">Kitchen Staff</option>
-                  </select>
-                </div>
               ` : ''}
 
               <div style="display: flex; flex-direction: column; gap: 0.35rem;">
@@ -1476,7 +1525,8 @@
 
         switch (action) {
           case 'switch-view': {
-            State.activeView = target.getAttribute('data-view');
+            const view = target.getAttribute('data-view');
+            if (State.canAccess(view)) State.activeView = view;
             this.render();
             break;
           }
@@ -1519,23 +1569,28 @@
           }
 
           case 'quick-demo-login': {
-            const role = target.getAttribute('data-role');
-            if (role === 'chef') {
-              State.saveUser({
-                name: 'Chef Vikram',
-                email: 'chef@canteenx.edu',
-                rollNumber: 'STAFF-01',
-                role: 'kitchen_staff'
+            const isChef = target.getAttribute('data-role') === 'chef';
+            const creds = isChef
+              ? { email: 'chef@canteenx.edu', password: 'chef123' }
+              : { email: 'aarav@campus.edu', password: 'campus123' };
+            try {
+              const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(creds)
               });
-              State.activeView = 'kitchen';
-            } else {
-              State.saveUser({
-                name: 'Aarav Sharma',
-                email: 'aarav@campus.edu',
-                rollNumber: 'CS-2024-042',
-                role: 'student'
-              });
-              State.activeView = 'student';
+              const data = await res.json();
+              if (!data.success) {
+                State.authError = data.message || 'Demo sign-in failed.';
+                this.render();
+                return;
+              }
+              State.saveUser(data.user);
+            } catch (err) {
+              // No server reachable: local-only demo profile (nothing server-side to protect).
+              State.saveUser(isChef
+                ? { name: 'Chef Vikram', email: 'chef@canteenx.edu', rollNumber: 'STAFF-01', role: 'kitchen_staff' }
+                : { name: 'Aarav Sharma', email: 'aarav@campus.edu', rollNumber: 'CS-2024-042', role: 'student' });
             }
             State.isAuthModalOpen = false;
             this.render();
@@ -1579,7 +1634,7 @@
                   name: email.split('@')[0],
                   email: email,
                   rollNumber: 'CS-LOCAL',
-                  role: email.includes('chef') ? 'kitchen_staff' : 'student'
+                  role: 'student' // offline fallback never grants staff access
                 });
                 State.isAuthModalOpen = false;
                 this.render();
@@ -1588,10 +1643,8 @@
               // Register
               const nameInput = document.getElementById('reg-name');
               const rollInput = document.getElementById('reg-roll');
-              const roleSelect = document.getElementById('reg-role');
               const name = nameInput ? nameInput.value.trim() : '';
               const roll = rollInput ? rollInput.value.trim() : 'CS-GUEST';
-              const role = roleSelect ? roleSelect.value : 'student';
 
               if (!name) {
                 State.authError = 'Please enter your full name.';
@@ -1603,7 +1656,7 @@
                 const res = await fetch('/api/auth/register', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ name, email, rollNumber: roll, password, role })
+                  body: JSON.stringify({ name, email, rollNumber: roll, password })
                 });
                 const data = await res.json();
                 if (data.success) {
@@ -1618,7 +1671,7 @@
                   return;
                 }
               } catch (err) {
-                State.saveUser({ name, email, rollNumber: roll, role });
+                State.saveUser({ name, email, rollNumber: roll, role: 'student' });
                 State.isAuthModalOpen = false;
                 this.render();
               }
@@ -1676,6 +1729,7 @@
               return;
             }
 
+            if (State.isStaff()) return;
             if (!State.currentUser) {
               State.isAuthModalOpen = true;
               State.authError = 'Please sign in or create an account to confirm your order.';
@@ -1717,7 +1771,7 @@
 
             // Attempt saving to backend database
             try {
-              fetch('/api/orders', {
+              State.api('/api/orders', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(newOrder)
@@ -1753,12 +1807,14 @@
           }
 
           case 'kitchen-subtab': {
+            if (!State.isStaff()) return;
             State.kitchenSubTab = target.getAttribute('data-tab');
             this.render();
             break;
           }
 
           case 'update-status': {
+            if (!State.isStaff()) return;
             const ordId = target.getAttribute('data-id');
             const newStatus = target.getAttribute('data-status');
             const ord = State.orders.find(o => o.id === ordId);
@@ -1767,7 +1823,7 @@
               ord.updatedAt = new Date().toISOString();
               
               try {
-                fetch(`/api/orders/${ordId}`, {
+                State.api(`/api/orders/${ordId}`, {
                   method: 'PATCH',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ status: newStatus })
@@ -1786,12 +1842,13 @@
           }
 
           case 'toggle-stock': {
+            if (!State.isStaff()) return;
             const itemId = target.getAttribute('data-id');
             const item = State.menu.find(m => m.id === itemId);
             if (item) {
               item.isAvailable = !item.isAvailable;
               try {
-                fetch(`/api/menu/${itemId}`, {
+                State.api(`/api/menu/${itemId}`, {
                   method: 'PATCH',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ isAvailable: item.isAvailable })
@@ -1806,6 +1863,7 @@
           }
 
           case 'toggle-rush-pause': {
+            if (!State.isStaff()) return;
             const shouldPause = target.getAttribute('data-set') === 'true';
             State.rushHour.isPaused = shouldPause;
             State.rushHour.pausedUntil = shouldPause ? new Date(Date.now() + 15 * 60000).toISOString() : null;

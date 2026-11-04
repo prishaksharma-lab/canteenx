@@ -1,5 +1,6 @@
 // Vercel Serverless Function: /api/menu  (GET list, PATCH /api/menu/:id)
 const { getDb } = require('./_db');
+const { ROLES, requireRole } = require('./_auth');
 const seedMenu = require('./_menuSeed');
 
 let memoryMenu = seedMenu.map(i => ({ ...i }));
@@ -7,7 +8,7 @@ let memoryMenu = seedMenu.map(i => ({ ...i }));
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, PATCH, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(204).end();
 
   try {
@@ -15,6 +16,7 @@ module.exports = async function handler(req, res) {
     const col = db ? db.collection('menu') : null;
 
     if (req.method === 'PATCH') {
+      if (!(await requireRole(req, res, ROLES.STAFF))) return;
       const id = req.query && req.query.id;
       const { isAvailable } = req.body || {};
       if (!id || typeof isAvailable !== 'boolean') {

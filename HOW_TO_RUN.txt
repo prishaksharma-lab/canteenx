@@ -50,3 +50,14 @@ TROUBLESHOOTING
 - "python is not recognized": install Python and tick "Add Python to PATH",
   or try:  py server.py
 - "npm is not recognized": install Node.js, then reopen the terminal.
+
+
+ROLES & ACCESS
+--------------
+Guest (not signed in): browse menu, Counter TV. Must sign in to order.
+Student:               menu, place orders, see own orders in full.
+Kitchen staff:         kitchen board, update order status, toggle stock,
+                       rush-hour pause, see all orders.
+- Sign-up only creates student accounts; staff accounts are provisioned
+  (demo: chef@canteenx.edu). The server enforces all of this via signed tokens.
+- Vercel/Node: set SESSION_SECRET in the environment to sign tokens.
