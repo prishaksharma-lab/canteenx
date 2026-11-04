@@ -8,6 +8,10 @@ module.exports = function handler(req, res) {
     return res.status(204).end();
   }
 
+  if (req.method !== 'POST') {
+    return res.status(405).json({ success: false, message: 'Method not allowed' });
+  }
+
   const { email, password, name, rollNumber, role } = req.body || {};
 
   if (!email || !password) {

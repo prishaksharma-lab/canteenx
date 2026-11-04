@@ -56,5 +56,17 @@ module.exports = function handler(req, res) {
     return res.status(201).json({ success: true, order: newOrder });
   }
 
+  if (req.method === 'PATCH') {
+    const id = (req.query && req.query.id) || '';
+    const order = memoryOrders.find(o => o.id === id);
+    const status = (req.body || {}).status;
+    if (order && status) {
+      order.status = status;
+      order.updatedAt = new Date().toISOString();
+    }
+    // Serverless memory is not shared between instances; the client keeps its own copy.
+    return res.status(200).json({ success: true, order: order || null });
+  }
+
   return res.status(405).json({ error: 'Method not allowed' });
 };

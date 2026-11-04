@@ -24,6 +24,8 @@ const menuHandler = require('./api/menu.js');
 const ordersHandler = require('./api/orders.js');
 const authHandler = require('./api/auth.js');
 
+app.all('/api/menu/:id', (req, res) => { req.query.id = req.params.id; menuHandler(req, res); });
+app.all('/api/orders/:id', (req, res) => { req.query.id = req.params.id; ordersHandler(req, res); });
 app.all('/api/menu', (req, res) => menuHandler(req, res));
 app.all('/api/orders', (req, res) => ordersHandler(req, res));
 app.use('/api/auth', (req, res) => authHandler(req, res));
